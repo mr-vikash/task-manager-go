@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
+	"golang.org/x/crypto/bcrypt"
 )
 
 func Login(c *gin.Context) {
@@ -16,44 +17,50 @@ func Login(c *gin.Context) {
 	var user models.User
 	var jwtKey = []byte("my_secret_key")
 
-	c.BindJSON(&credential)
+	// ✅ Bind & validate input
+	if err := c.ShouldBindJSON(&credential); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Invalid input",
+		})
+		return
+	}
 
-	err := database.DB.Where("email", credential.Email).First(&user).Error
-
+	// ✅ Find user by email
+	err := database.DB.Where("email = ?", credential.Email).First(&user).Error
 	if err != nil {
-		c.JSON(404, gin.H{
-			"sucess": "falied",
-			"error":  err,
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"error": "Invalid email or password",
 		})
 		return
 	}
 
-	if user.Password != credential.Password {
-		c.JSON(404, gin.H{
-			"sucess":  "falied",
-			"message": "password is incorrect!",
+	// ✅ Compare hashed password
+	err = bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(credential.Password))
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"error": "Invalid email or password",
 		})
 		return
 	}
 
+	// ✅ Create JWT token
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"username": credential.Email,
-		"exp":      time.Now().Add(time.Hour * 24).Unix(),
+		"user_id": user.ID,
+		"email":   user.Email,
+		"exp":     time.Now().Add(24 * time.Hour).Unix(),
 	})
 
 	tokenString, err := token.SignedString(jwtKey)
-
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"status": "falied",
-			"error":  err,
+			"error": "Could not generate token",
 		})
 		return
 	}
 
+	// ✅ Success response
 	c.JSON(http.StatusOK, gin.H{
-		"status": "success",
-		"token":  tokenString,
+		"message": "Login successful",
+		"token":   tokenString,
 	})
-
 }
